@@ -2,6 +2,7 @@ struct Elem<K, V> {
     key: K,
     value: V,
     removed: bool,
+    psl: u8,
 }
 
 pub struct HashMap<K, V, H> {
@@ -14,7 +15,7 @@ pub struct HashMap<K, V, H> {
 impl<K, V, H> HashMap<K, V, H>
 where
     H: Fn(&K) -> u32,
-    K: PartialEq,
+    K: PartialEq + Clone,
     V: Clone,
 {
     const DEFAULT_SIZE: usize = 256;
@@ -70,18 +71,45 @@ where
             self.resize();
         }
 
-        let elem = Elem {
+        let hash = (self.hasher)(&key);
+        let mut psl = 0;
+        let mut new = Elem {
             key,
             value,
             removed: false,
+            psl: 0,
         };
-        let slot = self.find_slot(&elem.key);
 
-        if self.buffer[slot].is_none() {
-            self.len += 1;
+        let mut index = (hash as usize) % self.capacity;
+
+        loop {
+            match &mut self.buffer[index] {
+                None => {
+                    self.len += 1;
+                    break;
+                }
+                Some(curr) => {
+                    if curr.removed {
+                        break;
+                    };
+                    if psl > curr.psl {
+                        let temp = self.buffer[index].take().unwrap();
+
+                        new.psl = psl;
+                        self.buffer[index] = Some(new);
+
+                        psl = temp.psl;
+                        new = temp;
+                    }
+                }
+            }
+
+            index = (index + 1) % self.capacity;
+            psl += 1;
         }
 
-        self.buffer[slot] = Some(elem);
+        new.psl = psl;
+        self.buffer[index] = Some(new);
     }
 
     pub fn get(&mut self, key: K) -> Option<V> {
@@ -173,7 +201,9 @@ mod test {
             assert_eq!(Some("number"), map.get(i));
         }
 
-        assert_eq!(size, map.len);
+        assert_eq!(size * 2, map.buffer.len());
         assert_eq!(size * 2, map.capacity);
+        assert_eq!(size, map.len);
+        assert_eq!(map.capacity, map.buffer.len(),);
     }
 }
